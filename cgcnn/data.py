@@ -10,7 +10,7 @@ import warnings
 import numpy as np
 import torch
 from pymatgen.core.structure import Structure
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
@@ -307,6 +307,7 @@ class CIFData(Dataset):
         with open(id_prop_file) as f:
             reader = csv.reader(f)
             self.id_prop_data = [row for row in reader]
+            self.index_mapping = {id_prop[0]: idx for idx, id_prop in enumerate(self.id_prop_data)}
         random.seed(random_seed)
         random.shuffle(self.id_prop_data)
         atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
@@ -350,3 +351,84 @@ class CIFData(Dataset):
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         target = torch.Tensor([float(target)])
         return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+
+def get_fixed_train_val_test_loader(dataset, collate_fn=default_collate,
+                                    batch_size=64, return_test=False, num_workers=1,
+                                    pin_memory=False):
+    """
+    Utility function for creating data loaders with fixed train, val, test datasets
+    based on CIF IDs stored in separate files.
+
+    Parameters
+    ----------
+    dataset: CIFData
+        The CIFData dataset object.
+    cif_ids_path: str
+        Path to the directory containing the CIF ID files.
+        The directory should contain 'train.txt', 'val.txt', and 'test.txt' files,
+        each storing the CIF IDs of the corresponding dataset.
+    collate_fn: torch.utils.data.DataLoader
+    batch_size: int
+    return_test: bool
+        Whether to return the test dataset loader. If False, the last test_size
+        data will be hidden.
+    num_workers: int
+    pin_memory: bool
+
+    Returns
+    -------
+    train_loader: torch.utils.data.DataLoader
+        DataLoader that contains the fixed training data.
+    val_loader: torch.utils.data.DataLoader
+        DataLoader that contains the fixed validation data.
+    (test_loader): torch.utils.data.DataLoader
+        DataLoader that contains the fixed test data, returned if return_test=True.
+    """
+    # Load CIF IDs from files
+    train_ids = load_cif_ids(os.path.join(dataset.root_dir, 'train_set.txt'))
+    val_ids = load_cif_ids(os.path.join(dataset.root_dir, 'val_set.txt'))
+    test_ids = load_cif_ids(os.path.join(dataset.root_dir, 'test_set.txt'))
+
+    # Map CIF IDs to dataset indices
+    train_indices = [dataset.index_mapping[id] for id in train_ids]
+    val_indices = [dataset.index_mapping[id] for id in val_ids]
+    test_indices = [dataset.index_mapping[id] for id in test_ids]
+
+    # Create Subset based on CIF IDs
+    train_subset = Subset(dataset, train_indices)
+    val_subset = Subset(dataset, val_indices)
+    test_subset = Subset(dataset, test_indices)
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_subset, batch_size=batch_size,
+                              num_workers=num_workers, collate_fn=collate_fn,
+                              pin_memory=pin_memory)
+    val_loader = DataLoader(val_subset, batch_size=batch_size,
+                            num_workers=num_workers, collate_fn=collate_fn,
+                            pin_memory=pin_memory)
+    if return_test:
+        test_loader = DataLoader(test_subset, batch_size=batch_size,
+                                 num_workers=num_workers, collate_fn=collate_fn,
+                                 pin_memory=pin_memory)
+        return train_loader, val_loader, test_loader
+    else:
+        return train_loader, val_loader
+
+
+def load_cif_ids(file_path):
+    """
+    Load CIF IDs from a text file.
+
+    Parameters
+    ----------
+    file_path: str
+        Path to the text file containing CIF IDs.
+
+    Returns
+    -------
+    cif_ids: list
+        List of CIF IDs read from the text file.
+    """
+    with open(file_path, 'r') as file:
+        cif_ids = [line.strip() for line in file]
+    return cif_ids

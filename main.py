@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 
 from cgcnn.data import CIFData
-from cgcnn.data import collate_pool, get_train_val_test_loader
+from cgcnn.data import collate_pool, get_train_val_test_loader, get_fixed_train_val_test_loader, load_cif_ids
 from cgcnn.model import CrystalGraphConvNet
 
 parser = argparse.ArgumentParser(description='Crystal Graph Convolutional Neural Networks')
@@ -77,6 +77,8 @@ parser.add_argument('--n-conv', default=3, type=int, metavar='N',
                     help='number of conv layers')
 parser.add_argument('--n-h', default=1, type=int, metavar='N',
                     help='number of hidden layers after pooling')
+parser.add_argument('--fixed-train', default=False, type=bool,
+                    help='to figure if fixed training will be performed')
 
 args = parser.parse_args(sys.argv[1:])
 
@@ -94,19 +96,28 @@ def main():
     # load data
     dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
-    train_loader, val_loader, test_loader = get_train_val_test_loader(
-        dataset=dataset,
-        collate_fn=collate_fn,
-        batch_size=args.batch_size,
-        train_ratio=args.train_ratio,
-        num_workers=args.workers,
-        val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        pin_memory=args.cuda,
-        train_size=args.train_size,
-        val_size=args.val_size,
-        test_size=args.test_size,
-        return_test=True)
+    if args.fixed_train:
+        train_loader, val_loader, test_loader = get_fixed_train_val_test_loader(
+            dataset=dataset, 
+            collate_fn=collate_fn,
+            batch_size=args.batch_size, 
+            return_test=True, 
+            num_workers=args.workers,
+            pin_memory=args.cuda)
+    else:
+        train_loader, val_loader, test_loader = get_train_val_test_loader(
+            dataset=dataset,
+            collate_fn=collate_fn,
+            batch_size=args.batch_size,
+            train_ratio=args.train_ratio,
+            num_workers=args.workers,
+            val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio,
+            pin_memory=args.cuda,
+            train_size=args.train_size,
+            val_size=args.val_size,
+            test_size=args.test_size,
+            return_test=True)
 
     # obtain target value normalizer
     if args.task == 'classification':
@@ -406,7 +417,7 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     if test:
         star_label = '**'
         import csv
-        with open('test_results.csv', 'w') as f:
+        with open('test_results_izasc.csv', 'w') as f:
             writer = csv.writer(f)
             for cif_id, target, pred in zip(test_cif_ids, test_targets,
                                             test_preds):
